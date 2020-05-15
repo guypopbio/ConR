@@ -46,14 +46,65 @@
   
   # crs <- sp::CRS("+proj=longlat +datum=WGS84")
   # rgdal::crs(p1) <- crs
-  
-  sp::proj4string(p1) <- sp::CRS("+proj=longlat +datum=WGS84", doCheckCRSArgs=TRUE)
+
+
+    
+  sp::proj4string(p1) <- 
+    sp::CRS("+proj=longlat +datum=WGS84", doCheckCRSArgs=TRUE)
   
   suppressWarnings(geosphere::makePoly(p1))
   
   return(p1)
 }
 
+
+
+
+.Convex.Hull.Poly_proj <- function(XY) {
+  
+  hpts <- grDevices::chull(x =  XY[, 1], y = XY[, 2])
+  hpts <- c(hpts, hpts[1])
+  coord <- matrix(NA, length(hpts), 2)
+  POLY <- "POLYGON(("
+  for (i in 1:length(hpts)) {
+    POLY <- paste(POLY, XY[hpts[i], 1], " ", XY[hpts[i], 2], sep = "")
+    if (i != length(hpts))
+      POLY <- paste(POLY, ", ", sep = "")
+    if (i == length(hpts))
+      POLY <- paste(POLY, "))", sep = "")
+    
+    coord[i, 1] <- XY[hpts[i], 2]
+    coord[i, 2] <- XY[hpts[i], 1]
+    
+  }
+  # p1 <- rgeos::readWKT(POLY)
+  # raster::crs(p1) <- "+proj=longlat +datum=WGS84"
+  # geosphere::makePoly(p1)
+  
+  p1 <- rgeos::readWKT(POLY)
+  # crs <- sp::CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+  # raster::crs(p1) <- crs
+  
+  # raster::crs(p1) <- sp::CRS("+init=epsg:4326")
+  #   
+  #   sp::CRS(projargs = "+proj=longlat +datum=WGS84", 
+  #                     SRS_string = wkt_crs <-
+  #                       rgdal::showWKT(
+  #                         "+proj=longlat +datum=WGS84"
+  #                       ))
+  
+  # crs <- sp::CRS("+proj=longlat +datum=WGS84")
+  # rgdal::crs(p1) <- crs
+  
+  
+  
+  # sp::proj4string(p1) <- 
+  #   sp::CRS("+proj=longlat +datum=WGS84", doCheckCRSArgs=TRUE)
+  # 
+  # suppressWarnings(geosphere::makePoly(p1))
+  
+  return(p1)
+}
 
 #' Internal function
 #'
@@ -230,10 +281,10 @@
   #   
   # }
   
-  EOO <-
-    round(suppressWarnings(geosphere::areaPolygon(poly_masked)) / 1000000, 1)
+  # EOO <-
+  #   round(suppressWarnings(geosphere::areaPolygon(poly_masked)) / 1000000, 1)
   
-  return(list(EOO, poly_masked))
+  return(poly_masked)
 }
 
 #' Internal function
@@ -266,7 +317,8 @@
                        convex.hull = TRUE,
                        alpha = 1,
                        buff.alpha = 0.1,
-                       method.less.than3 = "not comp") {
+                       method.less.than3 = "not comp",
+                       proj_coord = FALSE) {
   # , verbose=TRUE
   
   ### Checking if the method of calculating EOO has been chosen
@@ -283,6 +335,8 @@
         )
       )
   
+  
+  computing <- TRUE
   ## Check if there are less than 3 unique occurrences
   if (nrow(unique(XY)) < 3) {
     ## if there is only one occurrence, EOO is NA
@@ -329,83 +383,102 @@
     OUTPUT <- round(EOO, 0)
     names(OUTPUT) <- c("EOO")
     
-  } else{
-    ### Checking if all occurrences are on a straight line
-    if (length(unique(XY[, 1])) == 1 ||
-        length(unique(XY[, 2])) == 1 ||
-        round(abs(stats::cor(XY[, 1], XY[, 2])), 6) == 1) {
-      ## If so, a straight line is built and a buffer of buff_width is added
-      message(
-        paste(
-          "\nOccurrences of",
-          as.character(Name_Sp),
-          "follow a straight line, thus EOO is based on an artificial polygon using buff_width"
-        )
+    computing <- FALSE
+  }
+  
+  
+  ## if more than 3 occurrences
+  ### Checking if all occurrences are on a straight line
+  if (length(unique(XY[, 1])) == 1 ||
+      length(unique(XY[, 2])) == 1 ||
+      round(abs(stats::cor(XY[, 1], XY[, 2])), 6) == 1 &
+      computing) {
+    ## If so, a straight line is built and a buffer of buff_width is added
+    message(
+      paste(
+        "\nOccurrences of",
+        as.character(Name_Sp),
+        "follow a straight line, thus EOO is based on an artificial polygon using buff_width"
       )
-      hpts <- unique(XY[, c(2, 1)])
-      POLY <- "LINESTRING("
-      for (Z in 1:dim(hpts)[1]) {
-        POLY <- paste(POLY, hpts[Z, 1], " ", hpts[Z, 2], sep = "")
-        if (Z != dim(hpts)[1])
-          POLY <- paste(POLY, ", ", sep = "")
-        if (Z == dim(hpts)[1])
-          POLY <- paste(POLY, ")", sep = "")
-      }
-      p1 <- rgeos::readWKT(POLY)
-      
-      p1 <- rgeos::readWKT(POLY)
-      raster::crs(p1) <- sp::CRS("+proj=longlat +datum=WGS84", doCheckCRSArgs=TRUE)
-      
-      # crs <- CRS("+proj=longlat +datum=WGS84")
-      # crs(p1) <- crs
-      
-      p1 <-
-        suppressWarnings(geosphere::makeLine(p1)) ### Add vertices to line
-      
-      p1 <-
-        suppressWarnings(rgeos::gBuffer(p1, width = buff_width)) ### Add buffer to line
-      
-      ## If exclude.area is TRUE
-      if (exclude.area) {
-        croped.EOO <- .crop.poly(poly = p1, crop = country_map)
-        p1 <- croped.EOO[[2]]
-        EOO <- croped.EOO[[1]]
-      } else{
-        EOO <- round(suppressWarnings(geosphere::areaPolygon(p1)) / 1000000,
-                     1)
-      }
-      
-    } else{
-      
-      if (alpha.hull)
-        p1 <-
-          .alpha.hull.poly(cbind(XY[, 2], XY[, 1]), alpha = alpha, buff = buff.alpha)
-      
-      if (convex.hull)
-        p1 <- .Convex.Hull.Poly(cbind(XY[, 2], XY[, 1]))
-      
-      if (exclude.area) {
-        croped.EOO <- 
-          .crop.poly(poly = p1, 
-                     crop = country_map)
-        p1 <- croped.EOO[[2]]
-      }
-      
-      ## If exclude.area is TRUE
-      if (exclude.area) {
-        EOO <-
-          croped.EOO[[1]]
-      } else{
-        EOO <-
-          round(suppressWarnings(geosphere::areaPolygon(p1)) / 1000000,
-                0)
-      }
+    )
+    hpts <- unique(XY[, c(2, 1)])
+    POLY <- "LINESTRING("
+    for (Z in 1:dim(hpts)[1]) {
+      POLY <- paste(POLY, hpts[Z, 1], " ", hpts[Z, 2], sep = "")
+      if (Z != dim(hpts)[1])
+        POLY <- paste(POLY, ", ", sep = "")
+      if (Z == dim(hpts)[1])
+        POLY <- paste(POLY, ")", sep = "")
     }
+    p1 <- rgeos::readWKT(POLY)
+    
+    p1 <- rgeos::readWKT(POLY)
+    raster::crs(p1) <-
+      sp::CRS("+proj=longlat +datum=WGS84", doCheckCRSArgs = TRUE)
+    
+    # crs <- CRS("+proj=longlat +datum=WGS84")
+    # crs(p1) <- crs
+    
+    p1 <-
+      suppressWarnings(geosphere::makeLine(p1)) ### Add vertices to line
+    
+    p1 <-
+      suppressWarnings(rgeos::gBuffer(p1, width = buff_width)) ### Add buffer to line
+    
+    ## If exclude.area is TRUE
+    if (exclude.area) {
+      croped.EOO <- .crop.poly(poly = p1, crop = country_map)
+      p1 <- croped.EOO
+    }
+    
+    EOO <- round(suppressWarnings(geosphere::areaPolygon(p1)) / 1000000,
+                   1)
+    
+    OUTPUT <- list(EOO, p1)
+    names(OUTPUT) <- c("EOO", "spatial.polygon")
+    
+    computing <- FALSE
+  }
+    
+    
+  ## if more than 3 occurrences and not straight line
+  if (computing) {
+    if (alpha.hull)
+      p1 <-
+        .alpha.hull.poly(cbind(XY[, 2], XY[, 1]), alpha = alpha, buff = buff.alpha)
+    
+    if (convex.hull)
+      p1 <- .Convex.Hull.Poly(cbind(XY[, 2], XY[, 1]))
+    
+    
+    p1 <- .Convex.Hull.Poly_proj(rgdal::project(as.matrix(XY[, c(2, 1)]),
+                                                proj = as.character(.proj_crs()), inv =
+                                                  FALSE))
+    p1_sf <- as(p1, "sf")
+    sf::st_crs(p1_sf) <- .proj_crs()
+    as.numeric(sf::st_area(p1_sf)) / 1000000
+    
+    if (exclude.area) {
+      croped.EOO <-
+        .crop.poly(poly = p1,
+                   crop = country_map)
+      p1 <- croped.EOO
+    }
+    
+    p1_sf <- as(p1, "sf")
+    sf::st_crs(p1_sf) <- 4326
+    p1_sf_proj <- 
+      sf::st_transform(p1_sf, crs = .proj_crs())
+    as.numeric(sf::st_area(p1_sf_proj)) / 1000000
+    
+    EOO <-
+      round(suppressWarnings(geosphere::areaPolygon(p1)) / 1000000,
+            0)
     
     OUTPUT <- list(EOO, p1)
     names(OUTPUT) <- c("EOO", "spatial.polygon")
   }
-  
+    
   # if(verbose) cat(" ",paste(Name_Sp,"EOO comp."))
   
   return(OUTPUT)
@@ -1045,10 +1118,12 @@ subpop.comp <- function(XY, Resol_sub_pop = 5) {
   #   "+proj=eqc +lat_ts=60 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
   
   
-  # https://proj.org/operations/projections/cea.html#id1
+  # https://spatialreference.org/ref/sr-org/world-cylindrical-equal-area/
   # Equal Area Cylindrical
+  # proj <-
+  #   "+proj=cea +lat_ts=0.0  +lon_0=0.0 +ellps=GRS80 +k_0=1.0 +x_0=0.0 +y_0=0.0"
   proj <-
-    "+proj=cea +lat_ts=0.0  +lon_0=0.0 +ellps=GRS80 +k_0=1.0 +x_0=0.0 +y_0=0.0"
+    "+proj=cea +lon_0=0 +lat_ts=0 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"
   
   ## https://epsg.io/102022
   ## Africa Albers Equal Area Conic
@@ -1058,13 +1133,24 @@ subpop.comp <- function(XY, Resol_sub_pop = 5) {
   # "+proj=eqc +lat_ts=60 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
   
   if (rgdal::rgdal_extSoftVersion()[1] >= "3.0.0")  {
-    wkt_crs <-
-      rgdal::showWKT(
-        proj
-      )
+    # wkt_crs <-
+    #   rgdal::showWKT(
+    #     proj
+    #   )
+    
+    wkt_crs <- 
+      'PROJCS["World_Cylindrical_Equal_Area",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Cylindrical_Equal_Area"],PARAMETER["false_easting",0.0],PARAMETER["false_northing",0.0],PARAMETER["central_meridian",0.0],PARAMETER["standard_parallel_1",0.0],UNIT["Meter",1.0]]'
+    
+    
     crs_proj <- 
-      sp::CRS(projargs = proj, 
-                        SRS_string = wkt_crs, doCheckCRSArgs = TRUE)
+      sp::CRS(
+                        SRS_string = skt_crs, doCheckCRSArgs = TRUE)
+    
+    # crs_proj <- 
+    #   sp::CRS(projargs = proj, 
+    #           SRS_string = wkt_crs, doCheckCRSArgs = TRUE)
+    
+    
   }
   
   if (rgdal::rgdal_extSoftVersion()[1] < "3.0.0")
